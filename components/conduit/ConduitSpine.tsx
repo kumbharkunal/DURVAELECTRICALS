@@ -10,7 +10,6 @@ import {
   SocketGlyph,
   Type2Glyph,
 } from '@/components/icons/schematic';
-import { getScrollEngine } from '@/lib/scrollEngine';
 import { usePrefersReducedMotion } from '@/lib/useReducedMotion';
 
 /**
@@ -181,10 +180,10 @@ export function ConduitSpine() {
     stops.current = best.map((b) => b.at);
   }, [geometry]);
 
-  /* Draw and pulse — driven directly by Lenis scroll events.
-     Bypasses ScrollTrigger entirely so there is no intermediate scrub lag.
-     Lenis fires 'scroll' with itself as the argument; .progress is scroll/limit
-     already clamped to [0, 1]. */
+  /* Draw and pulse — driven by the native window scroll event.
+     Lenis animates window.scrollY by calling window.scrollTo, so reading
+     window.scrollY directly is always perfectly in sync with the rendered
+     content position — no intermediate easing layer, no event lag. */
   useEffect(() => {
     const path = pathRef.current;
     const pulse = pulseRef.current;
@@ -207,44 +206,45 @@ export function ConduitSpine() {
 
     path.style.strokeDashoffset = `${total}`;
 
-    let cancelled = false;
+    let lastLit = -1;
+    let rafId = 0;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let lenisInstance: any = null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let boundHandler: ((l: any) => void) | null = null;
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const applyProgress = (progress: number) => {
       path.style.strokeDashoffset = `${total * (1 - progress)}`;
       // Pulse rides just behind the draw head — board to charger only.
       pulse.style.strokeDashoffset = `${PULSE_LENGTH - total * progress}`;
+      // Only call setLit when a junction is actually crossed — not every frame.
       let count = 0;
       for (const at of stops.current) if (progress >= at) count += 1;
-      setLit(count);
+      if (count !== lastLit) {
+        lastLit = count;
+        setLit(count);
+      }
     };
 
-    getScrollEngine().then(({ lenis }) => {
-      if (cancelled) return;
+    const getProgress = (): number => {
+      const limit = document.documentElement.scrollHeight - window.innerHeight;
+      return limit > 0 ? Math.min(1, Math.max(0, window.scrollY / limit)) : 0;
+    };
 
-      lenisInstance = lenis;
+    // Gate to one DOM write per rAF even if multiple scroll events fire.
+    let scheduled = false;
+    const onScroll = () => {
+      if (scheduled) return;
+      scheduled = true;
+      rafId = requestAnimationFrame(() => {
+        scheduled = false;
+        applyProgress(getProgress());
+      });
+    };
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      boundHandler = (l: any) => {
-        applyProgress(typeof l?.progress === 'number' ? l.progress : 0);
-      };
-
-      lenis.on('scroll', boundHandler);
-
-      // Sync to wherever the user already is (page might not be at top).
-      applyProgress(typeof lenis.progress === 'number' ? lenis.progress : 0);
-    });
+    window.addEventListener('scroll', onScroll, { passive: true });
+    // Sync immediately — user may have already scrolled before mount.
+    applyProgress(getProgress());
 
     return () => {
-      cancelled = true;
-      if (lenisInstance && boundHandler) {
-        lenisInstance.off('scroll', boundHandler);
-      }
+      window.removeEventListener('scroll', onScroll);
+      cancelAnimationFrame(rafId);
     };
   }, [geometry, reduced]);
 
