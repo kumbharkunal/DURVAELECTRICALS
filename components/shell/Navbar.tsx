@@ -39,6 +39,7 @@ export function Navbar() {
   const [open, setOpen] = useState(false);
   const [condensed, setCondensed] = useState(false);
   const [hidden, setHidden] = useState(false);
+  const [animating, setAnimating] = useState(false);
   const reduced = usePrefersReducedMotion();
   const active = useActiveSection(SECTION_IDS);
 
@@ -163,20 +164,24 @@ export function Navbar() {
 
   // Links stagger only once the shell has finished growing — starting them
   // during the morph makes both animations read as one smear.
+  //
+  // Closing is deliberately NOT the reverse of that. A staggered exit holds the
+  // box at full height for the length of the whole stagger before it can begin
+  // to shrink, which is the hitch this used to have. One short fade on the
+  // container instead, so the box starts closing immediately.
   const listVariants = reduced
     ? { hidden: {}, shown: {}, exit: {} }
     : {
         hidden: {},
         shown: { transition: { delayChildren: 0.2, staggerChildren: 0.04 } },
-        exit: { transition: { staggerChildren: 0.02, staggerDirection: -1 } },
+        exit: { opacity: 0, transition: { duration: 0.14, ease: SOFT_CLOSE } },
       };
 
   const itemVariants = reduced
-    ? { hidden: {}, shown: {}, exit: {} }
+    ? { hidden: {}, shown: {} }
     : {
         hidden: { opacity: 0, y: 8 },
         shown: { opacity: 1, y: 0, transition: { duration: 0.4, ease: SOFT_CLOSE } },
-        exit: { opacity: 0, y: 4, transition: { duration: 0.12 } },
       };
 
   return (
@@ -247,7 +252,12 @@ export function Navbar() {
           layout
           transition={reduced ? CROSSFADE : SPRING}
           onPanEnd={onPanEnd}
-          style={{ willChange: open ? 'transform' : 'auto' }}
+          onLayoutAnimationStart={() => setAnimating(true)}
+          onLayoutAnimationComplete={() => setAnimating(false)}
+          // Keyed off the animation, not off `open`. Keying it off `open` meant
+          // the compositor layer was dropped on the very frame the close began,
+          // which is its own visible hitch.
+          style={{ willChange: animating ? 'transform' : 'auto' }}
           className={[
             SURFACE,
             'mx-auto w-full max-w-[30rem] overflow-hidden md:hidden',
@@ -299,7 +309,11 @@ export function Navbar() {
             </button>
           </m.div>
 
-          <AnimatePresence initial={false}>
+          {/* popLayout pulls the exiting menu out of the layout flow the moment
+              it starts leaving, so the shell can shrink at the same time as the
+              menu fades rather than waiting for it to finish. overflow-hidden
+              clips the fading content behind the closing edge. */}
+          <AnimatePresence initial={false} mode="popLayout">
             {open ? (
               <m.div
                 id="mobile-menu"
