@@ -29,6 +29,16 @@ export const business = {
   },
   /** One canonical NAP string. The old site had two different ones on one page. */
   addressLine: 'Ashalepada, Ulhasnagar-4, Thane District, Maharashtra 421004',
+  /**
+   * Map embed and directions both resolve the same query string, so the pin
+   * and the directions link can never drift apart. The `output=embed` form
+   * needs no API key, which keeps this a pure static export with no billing
+   * account attached to the client's site.
+   *
+   * Replace with a Google Business Profile place ID once Rohit has one — that
+   * pins the exact premises and feeds local SEO, which a text query cannot.
+   */
+  mapQuery: 'Ashalepada, Ulhasnagar-4, Thane, Maharashtra 421004',
   siteUrl: 'https://durvaelectricals.pages.dev',
 } as const;
 

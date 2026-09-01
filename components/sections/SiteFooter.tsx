@@ -1,3 +1,4 @@
+import { FooterMap } from '@/components/sections/FooterMap';
 import { InstagramGlyph } from '@/components/icons/InstagramGlyph';
 import { business, footer, navFull } from '@/content/site';
 
@@ -69,6 +70,8 @@ export function SiteFooter() {
             </ul>
           </nav>
         </div>
+
+        <FooterMap />
 
         <div className="mt-14 flex flex-wrap items-center justify-between gap-4 border-t border-paper/15 pt-8">
           <p className="text-micro text-paper/60">
