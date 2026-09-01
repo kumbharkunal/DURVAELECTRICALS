@@ -1,6 +1,6 @@
 'use client';
 
-import { LazyMotion, domAnimation, m } from 'motion/react';
+import { AnimatePresence, LazyMotion, m, type PanInfo } from 'motion/react';
 import { Menu, Phone, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
@@ -17,6 +17,23 @@ const SECTION_IDS = navPrimary.map((item) => item.href.slice(1));
 
 /** Shared between the closed pill and the open panel so the morph lines up. */
 const SURFACE = 'u-glass rounded-[1.75rem]';
+
+/**
+ * `domMax` rather than `domAnimation`.
+ *
+ * The mobile pill morphs into the menu by growing a single shell, which needs
+ * layout projection — `domAnimation` does not carry it. The reason the brief
+ * asked for `domAnimation` was to keep the full motion bundle out of first
+ * load, and this still does: see lib/motionFeatures for why the split point
+ * has to be its own module to actually produce a separate chunk.
+ */
+const loadFeatures = () => import('@/lib/motionFeatures').then((mod) => mod.default);
+
+/** Tuple, not number[] — motion types the cubic-bezier as a fixed 4-tuple. */
+const SOFT_CLOSE = [0.22, 0.85, 0.24, 1] as const;
+const SPRING = { type: 'spring', stiffness: 260, damping: 30, mass: 0.9 } as const;
+const CROSSFADE = { duration: 0.15, ease: 'linear' } as const;
+const FOCUSABLE = 'a[href], button:not([disabled]), input, select, [tabindex]:not([tabindex="-1"])';
 
 export function Navbar() {
   const [open, setOpen] = useState(false);
@@ -95,21 +112,12 @@ export function Navbar() {
     };
   }, [open]);
 
-  /* Focus trap, Escape, and focus restored to the hamburger on close. */
+  /* Escape closes; focus is trapped inside the shell and returned on close.
+     The trap scopes to the whole shell rather than a panel element, because
+     the header row and the menu now live in the same box. */
   useEffect(() => {
     if (!open) return;
-    const panel = panelRef.current;
-    if (!panel) return;
     const trigger = triggerRef.current;
-
-    const focusable = () =>
-      Array.from(
-        panel.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input, select, [tabindex]:not([tabindex="-1"])',
-        ),
-      );
-
-    focusable()[0]?.focus();
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -119,8 +127,14 @@ export function Navbar() {
       }
       if (event.key !== 'Tab') return;
 
-      const items = focusable();
+      const shell = panelRef.current;
+      if (!shell) return;
+
+      const items = Array.from(shell.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+        (el) => el.offsetParent !== null,
+      );
       if (items.length === 0) return;
+
       const first = items[0];
       const last = items[items.length - 1];
 
@@ -140,32 +154,33 @@ export function Navbar() {
     };
   }, [open, close]);
 
-  /* Swipe down on the panel to close. */
-  const touchStart = useRef<number | null>(null);
-  const onTouchStart = (event: React.TouchEvent) => {
-    touchStart.current = (panelRef.current?.scrollTop ?? 0) <= 0 ? event.touches[0].clientY : null;
-  };
-  const onTouchMove = (event: React.TouchEvent) => {
-    if (touchStart.current === null) return;
-    if (event.touches[0].clientY - touchStart.current > 64) {
-      touchStart.current = null;
-      close();
-    }
+  /* Swipe down to close. onPanEnd rather than a raw touch handler, so the
+     gesture never fights the layout animation for control of the transform. */
+  const onPanEnd = (_: PointerEvent, info: PanInfo) => {
+    if (!open) return;
+    if (info.offset.y > 60 || info.velocity.y > 500) close();
   };
 
-  // Links stagger only after the container has settled. The panel container
-  // itself is animated in CSS (.u-menu-panel), so nothing propagates down —
-  // the list drives its own state.
+  // Links stagger only once the shell has finished growing — starting them
+  // during the morph makes both animations read as one smear.
   const listVariants = reduced
-    ? { closed: {}, open: {} }
-    : { closed: {}, open: { transition: { delayChildren: 0.18, staggerChildren: 0.04 } } };
+    ? { hidden: {}, shown: {}, exit: {} }
+    : {
+        hidden: {},
+        shown: { transition: { delayChildren: 0.2, staggerChildren: 0.04 } },
+        exit: { transition: { staggerChildren: 0.02, staggerDirection: -1 } },
+      };
 
   const itemVariants = reduced
-    ? { closed: { opacity: 1 }, open: { opacity: 1 } }
-    : { closed: { opacity: 0, y: 6 }, open: { opacity: 1, y: 0 } };
+    ? { hidden: {}, shown: {}, exit: {} }
+    : {
+        hidden: { opacity: 0, y: 8 },
+        shown: { opacity: 1, y: 0, transition: { duration: 0.4, ease: SOFT_CLOSE } },
+        exit: { opacity: 0, y: 4, transition: { duration: 0.12 } },
+      };
 
   return (
-    <LazyMotion features={domAnimation} strict>
+    <LazyMotion features={loadFeatures} strict>
       <header
         className={[
           'fixed inset-x-0 top-5 z-50 px-4',
@@ -222,36 +237,39 @@ export function Navbar() {
           <CallButton variant="compact" label="Call" className="shrink-0" />
         </nav>
 
-        {/* Mobile: the pill stays mounted and the panel overlays it at the same
-            position with the same surface, so the panel reads as the pill
-            growing downward.
-
-            The panel is always mounted and toggled by variant rather than by
-            AnimatePresence: its staggered children are variant-driven with no
-            exit variant to resolve, which left AnimatePresence waiting forever
-            and the panel stuck in the DOM at opacity 0. Keeping it mounted also
-            keeps the hamburger ref valid for focus restoration. */}
-        <div className="relative mx-auto max-w-[30rem] md:hidden">
-          <div
-            inert={open}
+        {/* Mobile: ONE shell carrying both the header row and the menu.
+            The menu mounts inside it and the shell's layout animation grows the
+            box to fit — so the pill genuinely becomes the card, rather than a
+            second card fading in on top of it. `overflow-hidden` clips the
+            content while the box is still growing. */}
+        <m.div
+          ref={panelRef}
+          layout
+          transition={reduced ? CROSSFADE : SPRING}
+          onPanEnd={onPanEnd}
+          style={{ willChange: open ? 'transform' : 'auto' }}
+          className={[
+            SURFACE,
+            'mx-auto w-full max-w-[30rem] overflow-hidden md:hidden',
+            open ? 'u-glass-panel' : '',
+          ].join(' ')}
+        >
+          {/* Header row. `layout="position"` keeps it pinned to the top of the
+              shell instead of being stretched as the box grows. */}
+          <m.div
+            layout="position"
+            transition={reduced ? CROSSFADE : SPRING}
             className={[
-              SURFACE,
               'flex items-center gap-2 transition-[padding] duration-150',
-              condensed ? 'u-glass-dense py-1.5 pr-1.5 pl-4' : 'py-2 pr-2 pl-4.5',
+              condensed && !open ? 'py-1.5 pr-1.5 pl-4' : 'py-2 pr-2 pl-4.5',
             ].join(' ')}
           >
-            <a
-              href="#top"
-              className="min-w-0 flex-1"
-              aria-label={`${business.name} — home`}
-            >
-              <Wordmark size="md" showDevanagari={!condensed} />
+            <a href="#top" onClick={close} className="min-w-0 flex-1" aria-label={`${business.name} — home`}>
+              <Wordmark size="md" showDevanagari={!condensed || open} />
             </a>
 
-            {/* The pill used to be a wordmark and a bare glyph with dead space
-                between them. Calling is the whole point of the site on a phone,
-                so the gap carries the action — mirroring the desktop pill,
-                which has had a Call button all along. */}
+            {/* Calling is the whole point of the site on a phone, so the gap
+                carries the action — mirroring the desktop pill. */}
             <a
               href={business.phoneHref}
               data-call-cta
@@ -261,77 +279,63 @@ export function Navbar() {
               <Phone aria-hidden="true" className="size-5" strokeWidth={2.25} />
             </a>
 
+            {/* One button that swaps its glyph in place, rather than a separate
+                close button in a separate panel — the control stays put while
+                the box around it changes shape. */}
             <button
               ref={triggerRef}
               type="button"
-              onClick={() => setOpen(true)}
+              onClick={() => setOpen((value) => !value)}
               aria-expanded={open}
-              aria-haspopup="dialog"
+              aria-controls="mobile-menu"
+              aria-label={open ? 'Close menu' : 'Open menu'}
               className="grid size-11 shrink-0 place-items-center rounded-full bg-navy/[0.07] text-navy active:bg-navy/[0.14]"
             >
-              <Menu aria-hidden="true" className="size-6" />
-              <span className="sr-only">Open menu</span>
-            </button>
-          </div>
-
-          <div
-            ref={panelRef}
-            inert={!open}
-            data-open={open}
-            className={[
-              SURFACE,
-              'u-glass-panel u-menu-panel absolute inset-x-0 top-0 max-h-[calc(100dvh-3.5rem)] overflow-y-auto p-2',
-              'will-change-[transform,opacity]',
-              open
-                ? 'pointer-events-auto opacity-100 motion-safe:translate-y-0 motion-safe:scale-y-100'
-                : 'pointer-events-none opacity-0 motion-safe:scale-y-[0.6]',
-            ].join(' ')}
-            onTouchStart={onTouchStart}
-            onTouchMove={onTouchMove}
-            role="dialog"
-            aria-modal={open}
-            aria-label="Menu"
-          >
-            <div className="flex items-center justify-between pt-1 pr-1 pl-1.5">
-              <Wordmark size="md" />
-              <button
-                type="button"
-                onClick={close}
-                className="grid size-11 shrink-0 place-items-center rounded-full bg-navy/[0.07] text-navy active:bg-navy/[0.14]"
-              >
+              {open ? (
                 <X aria-hidden="true" className="size-5" />
-                <span className="sr-only">Close menu</span>
-              </button>
-            </div>
+              ) : (
+                <Menu aria-hidden="true" className="size-6" />
+              )}
+            </button>
+          </m.div>
 
-            <m.ul
-              className="mt-2 px-1"
-              initial={false}
-              animate={open ? 'open' : 'closed'}
-              variants={listVariants}
-            >
-              {navFull.map((item) => (
-                <m.li key={item.href} variants={itemVariants}>
-                  <a
-                    href={item.href}
-                    onClick={close}
-                    className="font-display block border-b border-rule py-3 text-[1.0625rem] font-medium text-navy"
-                  >
-                    {item.label}
-                  </a>
-                </m.li>
-              ))}
-            </m.ul>
+          <AnimatePresence initial={false}>
+            {open ? (
+              <m.div
+                id="mobile-menu"
+                variants={listVariants}
+                initial="hidden"
+                animate="shown"
+                exit="exit"
+                className="px-3 pb-3"
+                style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))' }}
+              >
+                <ul className="flex flex-col">
+                  {navFull.map((item) => (
+                    <m.li key={item.href} variants={itemVariants}>
+                      <a
+                        href={item.href}
+                        onClick={close}
+                        className="font-display flex min-h-11 items-center rounded-xl px-2 text-[1.0625rem] font-medium text-navy transition-colors duration-200 active:bg-navy/[0.06]"
+                      >
+                        {item.label}
+                      </a>
+                    </m.li>
+                  ))}
+                </ul>
 
-            <div
-              className="mt-4 grid gap-2 px-1 pb-1"
-              style={{ paddingBottom: 'max(0.25rem, env(safe-area-inset-bottom, 0px))' }}
-            >
-              <CallButton variant="bar" />
-              <WhatsAppButton variant="bar" />
-            </div>
-          </div>
-        </div>
+                <m.div variants={itemVariants} className="px-2 pt-3">
+                  <div className="h-px w-full bg-rule" />
+                </m.div>
+
+                <m.div variants={itemVariants} className="grid gap-2 px-2 pt-3">
+                  <CallButton variant="bar" />
+                  <WhatsAppButton variant="bar" />
+                </m.div>
+              </m.div>
+            ) : null}
+          </AnimatePresence>
+        </m.div>
       </header>
 
       {/* Backdrop — tap to close. Plain CSS transition; no presence tracking. */}
@@ -342,7 +346,7 @@ export function Navbar() {
         inert={!open}
         onClick={close}
         className={[
-          'fixed inset-0 z-40 cursor-default bg-navy/25 transition-opacity duration-200 md:hidden',
+          'fixed inset-0 z-40 cursor-default bg-navy/25 backdrop-blur-[2px] transition-opacity duration-200 md:hidden',
           open ? 'opacity-100' : 'pointer-events-none opacity-0',
         ].join(' ')}
       />
