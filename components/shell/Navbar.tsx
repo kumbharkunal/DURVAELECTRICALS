@@ -1,7 +1,7 @@
 'use client';
 
 import { LazyMotion, domAnimation, m } from 'motion/react';
-import { Menu, X } from 'lucide-react';
+import { Menu, Phone, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { CallButton } from '@/components/ui/CallButton';
@@ -236,20 +236,38 @@ export function Navbar() {
             inert={open}
             className={[
               SURFACE,
-              'flex items-center justify-between transition-[padding] duration-150',
-              condensed ? 'u-glass-dense py-1 pr-1 pl-3' : 'py-1.5 pr-1.5 pl-4',
+              'flex items-center gap-2 transition-[padding] duration-150',
+              condensed ? 'u-glass-dense py-1.5 pr-1.5 pl-4' : 'py-2 pr-2 pl-4.5',
             ].join(' ')}
           >
-            <a href="#top" aria-label={`${business.name} — home`}>
-              <Wordmark showDevanagari={!condensed} />
+            <a
+              href="#top"
+              className="min-w-0 flex-1"
+              aria-label={`${business.name} — home`}
+            >
+              <Wordmark size="md" showDevanagari={!condensed} />
             </a>
+
+            {/* The pill used to be a wordmark and a bare glyph with dead space
+                between them. Calling is the whole point of the site on a phone,
+                so the gap carries the action — mirroring the desktop pill,
+                which has had a Call button all along. */}
+            <a
+              href={business.phoneHref}
+              data-call-cta
+              aria-label={`Call ${business.phone}`}
+              className="grid size-11 shrink-0 place-items-center rounded-full bg-live text-navy active:bg-[#63a314]"
+            >
+              <Phone aria-hidden="true" className="size-5" strokeWidth={2.25} />
+            </a>
+
             <button
               ref={triggerRef}
               type="button"
               onClick={() => setOpen(true)}
               aria-expanded={open}
               aria-haspopup="dialog"
-              className="grid size-11 shrink-0 place-items-center rounded-full text-navy"
+              className="grid size-11 shrink-0 place-items-center rounded-full bg-navy/[0.07] text-navy active:bg-navy/[0.14]"
             >
               <Menu aria-hidden="true" className="size-6" />
               <span className="sr-only">Open menu</span>
@@ -274,12 +292,12 @@ export function Navbar() {
             aria-modal={open}
             aria-label="Menu"
           >
-            <div className="flex items-center justify-between pt-1 pr-1 pl-3">
-              <Wordmark />
+            <div className="flex items-center justify-between pt-1 pr-1 pl-1.5">
+              <Wordmark size="md" />
               <button
                 type="button"
                 onClick={close}
-                className="grid size-11 place-items-center rounded-full text-navy"
+                className="grid size-11 shrink-0 place-items-center rounded-full bg-navy/[0.07] text-navy active:bg-navy/[0.14]"
               >
                 <X aria-hidden="true" className="size-5" />
                 <span className="sr-only">Close menu</span>

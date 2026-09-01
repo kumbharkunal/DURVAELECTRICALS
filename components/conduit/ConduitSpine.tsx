@@ -314,22 +314,25 @@ export function ConduitSpine() {
                 <line key={i} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} />
               ))}
             </g>
-            {/* The drawn run. */}
+            {/* The drawn run — the energised length of the circuit, so it
+                carries --live for its whole extent rather than reading as
+                dead navy conduit with one green spark travelling down it. */}
             <path
               ref={pathRef}
               d={geometry.d}
-              stroke="var(--color-navy)"
-              strokeOpacity="0.55"
-              strokeWidth="2"
+              stroke="var(--color-live)"
+              strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
-            {/* Live current. The only green that moves on this page. */}
+            {/* The arriving head — a heavier segment riding the leading edge,
+                so the current still reads as travelling now that the whole
+                completed run is green. */}
             <path
               ref={pulseRef}
               d={geometry.d}
               stroke="var(--color-live)"
-              strokeWidth="3"
+              strokeWidth="4.5"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
