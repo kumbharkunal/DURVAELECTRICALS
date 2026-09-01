@@ -14,19 +14,27 @@ export function SiteFooter() {
       <div className="u-container py-16 md:py-20">
         <div className="grid gap-12 md:grid-cols-[1fr_auto] md:gap-16">
           <div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4">
+              {/*
+                Shown in full colour, not silhouetted. It used to carry
+                `brightness-0 invert`, which flattens every pixel to white —
+                and since the mark is a circular badge, that rendered it as a
+                plain white disc with none of the logo visible. The badge's own
+                interior is close to --navy, so on this ground it reads as
+                embossed, with its green rim defining the edge.
+              */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="/images/logo.png"
                 alt=""
                 aria-hidden="true"
-                className="h-9 w-auto shrink-0 object-contain brightness-0 invert"
+                className="h-20 w-auto shrink-0 object-contain md:h-24"
               />
               <span className="flex flex-col leading-none">
-                <span className="font-display text-[1.25rem] font-bold tracking-[-0.02em]">
+                <span className="font-display text-[1.375rem] font-bold tracking-[-0.02em] md:text-[1.5rem]">
                   {business.name}
                 </span>
-                <span className="font-devanagari mt-1 text-[0.9375rem] font-semibold text-paper/75">
+                <span className="font-devanagari mt-1.5 text-[1rem] font-semibold text-paper/75">
                   {business.wordmarkDevanagari}
                 </span>
               </span>

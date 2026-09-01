@@ -8,9 +8,9 @@ type Size = 'sm' | 'md' | 'lg';
  * wordmark beside it at every size.
  */
 const sizes: Record<Size, { logo: string; name: string; devanagari: string }> = {
-  sm: { logo: 'h-8', name: 'text-[1.0625rem]', devanagari: 'mt-0.5 text-micro' },
-  md: { logo: 'h-10', name: 'text-[1.0625rem]', devanagari: 'mt-0.5 text-micro' },
-  lg: { logo: 'h-11', name: 'text-[1.25rem]', devanagari: 'mt-1 text-[0.9375rem]' },
+  sm: { logo: 'h-11', name: 'text-[1.0625rem]', devanagari: 'mt-0.5 text-micro' },
+  md: { logo: 'h-13', name: 'text-[1.0625rem]', devanagari: 'mt-0.5 text-micro' },
+  lg: { logo: 'h-14', name: 'text-[1.25rem]', devanagari: 'mt-1 text-[0.9375rem]' },
 };
 
 export function Wordmark({
