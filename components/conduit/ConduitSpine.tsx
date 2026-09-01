@@ -57,6 +57,7 @@ export function ConduitSpine() {
     junctions: Junction[];
     height: number;
     width: number;
+    vh: number;
     desktop: boolean;
   } | null>(null);
 
@@ -106,16 +107,9 @@ export function ConduitSpine() {
       junctions.push({ key: anchor.key, kind: anchor.kind, x: currentX, y: anchor.y, at: 0 });
     });
 
-    // Not querySelector('footer') — each review's attribution is a <footer>
-    // scoped to its blockquote, and that would stop the run at the reviews.
-    const footer = document.querySelector('[data-site-footer]');
-    const footerTop = footer
-      ? footer.getBoundingClientRect().top + window.scrollY
-      : height;
-    points.push({
-      x: currentX,
-      y: Math.min(anchors[anchors.length - 1].y + 160, footerTop - 32),
-    });
+    // The run terminates AT the Type 2 connector — that is where the circuit
+    // ends. Trailing past it leaves a green stub hanging in open space, which
+    // reads as the line breaking rather than arriving.
 
     const d = orthogonalPath(points, radius);
     const ticks = clampTicks(points, {
@@ -124,7 +118,15 @@ export function ConduitSpine() {
       size: desktop ? 11 : 5,
     });
 
-    setGeometry({ d, ticks, junctions, height, width: window.innerWidth, desktop });
+    setGeometry({
+      d,
+      ticks,
+      junctions,
+      height,
+      width: window.innerWidth,
+      vh: window.innerHeight,
+      desktop,
+    });
   }, []);
 
   /* Measure on mount, on resize, and once fonts have settled — a font swap
@@ -155,8 +157,15 @@ export function ConduitSpine() {
     };
   }, [measure]);
 
-  /* Normalised position of each junction along the path, for lighting. */
+  /* One walk of the path produces two things:
+     - stops: normalised path position of each junction, for lighting.
+     - lut: a document-Y → path-progress lookup. The path is not the same
+       length as the page (it starts in the hero and ends at the footer) and
+       it carries horizontal jogs, so a plain scroll ratio cannot locate the
+       draw head. Sampling the real path is the only exact mapping. */
   const stops = useRef<number[]>([]);
+  const lut = useRef<{ ys: number[]; ats: number[] }>({ ys: [], ats: [] });
+
   useEffect(() => {
     const path = pathRef.current;
     if (!path || !geometry) return;
@@ -164,13 +173,20 @@ export function ConduitSpine() {
     const total = path.getTotalLength();
     if (!total) return;
 
-    // Walk the path once and record where it passes closest to each junction.
     const samples = 240;
     const best = geometry.junctions.map(() => ({ dist: Infinity, at: 0 }));
+    const ys: number[] = [];
+    const ats: number[] = [];
 
     for (let i = 0; i <= samples; i += 1) {
       const at = i / samples;
       const p = path.getPointAtLength(total * at);
+
+      // Clamp to monotonic — horizontal jogs hold y constant, and a binary
+      // search needs a non-decreasing array.
+      ys.push(ys.length > 0 ? Math.max(p.y, ys[ys.length - 1]) : p.y);
+      ats.push(at);
+
       geometry.junctions.forEach((j, index) => {
         const d = Math.hypot(p.x - j.x, p.y - j.y);
         if (d < best[index].dist) best[index] = { dist: d, at };
@@ -178,17 +194,21 @@ export function ConduitSpine() {
     }
 
     stops.current = best.map((b) => b.at);
+    lut.current = { ys, ats };
   }, [geometry]);
 
-  /* Draw and pulse — rAF loop reading window.scrollY every frame.
-     Lenis calls window.scrollTo each tick, so window.scrollY is always the
-     exact value the browser rendered. A continuous loop avoids any event
-     scheduling gap that could cause missed frames during rapid scrolling.
+  /* Draw and pulse.
 
-     Progress formula: (scrollY + viewportHeight) / scrollHeight maps the
-     draw head to the BOTTOM of the visible viewport, so every section that
-     is on screen has the spine already drawn through it — matching the
-     user's intuition of "the line shows what I'm looking at". */
+     The draw head sits at a fixed line 82% down the viewport and is mapped
+     through the sampled path, so the spine is always drawn through whatever
+     is on screen and completes as the contact section arrives.
+
+     Driven straight off the native scroll event: Lenis moves the page with
+     window.scrollTo, so a scroll event fires on every one of its ticks and
+     window.scrollY is already the value the browser painted with. No rAF
+     hop, no easing layer, nothing to fall behind. The handler reads only
+     window.scrollY — viewport height comes from geometry — so it never
+     forces a layout. */
   useEffect(() => {
     const path = pathRef.current;
     const pulse = pulseRef.current;
@@ -211,14 +231,42 @@ export function ConduitSpine() {
 
     path.style.strokeDashoffset = `${total}`;
 
+    const lead = geometry.vh * 0.82;
     let lastLit = -1;
-    let rafId: number;
+    let lastOffset = -1;
 
-    const applyProgress = (progress: number) => {
-      path.style.strokeDashoffset = `${total * (1 - progress)}`;
-      // Pulse rides just behind the draw head — board to charger only.
-      pulse.style.strokeDashoffset = `${PULSE_LENGTH - total * progress}`;
-      // Only trigger React re-render when a junction is actually crossed.
+    /** Exact document-Y → path progress, via the sampled lookup table. */
+    const progressForY = (y: number): number => {
+      const { ys, ats } = lut.current;
+      if (ys.length < 2) return 0;
+      if (y <= ys[0]) return 0;
+      if (y >= ys[ys.length - 1]) return 1;
+
+      let lo = 0;
+      let hi = ys.length - 1;
+      while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1;
+        if (ys[mid] <= y) lo = mid;
+        else hi = mid;
+      }
+      const span = ys[hi] - ys[lo];
+      const t = span > 0 ? (y - ys[lo]) / span : 0;
+      return ats[lo] + (ats[hi] - ats[lo]) * t;
+    };
+
+    const update = () => {
+      const progress = progressForY(window.scrollY + lead);
+      const offset = total * (1 - progress);
+
+      // Sub-pixel changes are not worth a style write.
+      if (Math.abs(offset - lastOffset) > 0.25) {
+        lastOffset = offset;
+        path.style.strokeDashoffset = `${offset}`;
+        // Pulse rides just behind the draw head — board to charger only.
+        pulse.style.strokeDashoffset = `${PULSE_LENGTH - total * progress}`;
+      }
+
+      // Only trigger a React re-render when a junction is actually crossed.
       let count = 0;
       for (const at of stops.current) if (progress >= at) count += 1;
       if (count !== lastLit) {
@@ -227,20 +275,11 @@ export function ConduitSpine() {
       }
     };
 
-    const tick = () => {
-      const scrollH = document.documentElement.scrollHeight;
-      // Draw head tracks viewport bottom: fully drawn when scrolled to end.
-      const progress = scrollH > 0
-        ? Math.min(1, Math.max(0, (window.scrollY + window.innerHeight) / scrollH))
-        : 0;
-      applyProgress(progress);
-      rafId = requestAnimationFrame(tick);
-    };
-
-    rafId = requestAnimationFrame(tick);
+    window.addEventListener('scroll', update, { passive: true });
+    update();
 
     return () => {
-      cancelAnimationFrame(rafId);
+      window.removeEventListener('scroll', update);
     };
   }, [geometry, reduced]);
 

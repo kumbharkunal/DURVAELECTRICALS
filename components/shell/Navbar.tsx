@@ -170,9 +170,9 @@ export function Navbar() {
         className={[
           'fixed inset-x-0 top-5 z-50 px-4',
           'transition-transform duration-300 ease-out',
-          // Mobile pill is always visible — the hamburger must always be reachable.
-          // Desktop pill hides when scrolling down.
-          hidden && !open ? 'md:-translate-y-[150%]' : 'translate-y-0',
+          // Hides on scroll down, returns on scroll up — on both breakpoints.
+          // Any upward scroll brings the hamburger straight back.
+          hidden && !open ? '-translate-y-[150%]' : 'translate-y-0',
         ].join(' ')}
       >
         {/* Desktop pill */}
