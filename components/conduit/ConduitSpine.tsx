@@ -180,10 +180,15 @@ export function ConduitSpine() {
     stops.current = best.map((b) => b.at);
   }, [geometry]);
 
-  /* Draw and pulse — driven by the native window scroll event.
-     Lenis animates window.scrollY by calling window.scrollTo, so reading
-     window.scrollY directly is always perfectly in sync with the rendered
-     content position — no intermediate easing layer, no event lag. */
+  /* Draw and pulse — rAF loop reading window.scrollY every frame.
+     Lenis calls window.scrollTo each tick, so window.scrollY is always the
+     exact value the browser rendered. A continuous loop avoids any event
+     scheduling gap that could cause missed frames during rapid scrolling.
+
+     Progress formula: (scrollY + viewportHeight) / scrollHeight maps the
+     draw head to the BOTTOM of the visible viewport, so every section that
+     is on screen has the spine already drawn through it — matching the
+     user's intuition of "the line shows what I'm looking at". */
   useEffect(() => {
     const path = pathRef.current;
     const pulse = pulseRef.current;
@@ -207,13 +212,13 @@ export function ConduitSpine() {
     path.style.strokeDashoffset = `${total}`;
 
     let lastLit = -1;
-    let rafId = 0;
+    let rafId: number;
 
     const applyProgress = (progress: number) => {
       path.style.strokeDashoffset = `${total * (1 - progress)}`;
       // Pulse rides just behind the draw head — board to charger only.
       pulse.style.strokeDashoffset = `${PULSE_LENGTH - total * progress}`;
-      // Only call setLit when a junction is actually crossed — not every frame.
+      // Only trigger React re-render when a junction is actually crossed.
       let count = 0;
       for (const at of stops.current) if (progress >= at) count += 1;
       if (count !== lastLit) {
@@ -222,28 +227,19 @@ export function ConduitSpine() {
       }
     };
 
-    const getProgress = (): number => {
-      const limit = document.documentElement.scrollHeight - window.innerHeight;
-      return limit > 0 ? Math.min(1, Math.max(0, window.scrollY / limit)) : 0;
+    const tick = () => {
+      const scrollH = document.documentElement.scrollHeight;
+      // Draw head tracks viewport bottom: fully drawn when scrolled to end.
+      const progress = scrollH > 0
+        ? Math.min(1, Math.max(0, (window.scrollY + window.innerHeight) / scrollH))
+        : 0;
+      applyProgress(progress);
+      rafId = requestAnimationFrame(tick);
     };
 
-    // Gate to one DOM write per rAF even if multiple scroll events fire.
-    let scheduled = false;
-    const onScroll = () => {
-      if (scheduled) return;
-      scheduled = true;
-      rafId = requestAnimationFrame(() => {
-        scheduled = false;
-        applyProgress(getProgress());
-      });
-    };
-
-    window.addEventListener('scroll', onScroll, { passive: true });
-    // Sync immediately — user may have already scrolled before mount.
-    applyProgress(getProgress());
+    rafId = requestAnimationFrame(tick);
 
     return () => {
-      window.removeEventListener('scroll', onScroll);
       cancelAnimationFrame(rafId);
     };
   }, [geometry, reduced]);
