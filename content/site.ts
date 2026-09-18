@@ -89,7 +89,7 @@ export const trust = {
 
 export const problem = {
   id: 'the-problem',
-  heading: 'What most people are actually doing',
+  heading: 'What most people are actually doinggggggg',
   lead: 'Almost every EV in a Mumbai building spends its first months charging from a 15A socket in the parking. It works. That is the problem — it works right up until it does not.',
   imageAlt:
     'A portable EV charging cable plugged into an ordinary 15A wall socket, with an extension board on the floor beside it.',
